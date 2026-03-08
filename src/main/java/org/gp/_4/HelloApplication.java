@@ -21,7 +21,7 @@ public class HelloApplication extends Application
     private final ImageView[] cardViews = new ImageView[4];
     private final Label[] slotValueLabels = new Label[4];
 
-    private final Label cardValuesLabel = new Label("Card Values: [?, ?, ?, ?]");
+    private final Label pointsLabel = new Label("Points: 0");
     private final Label statusLabel = new Label("Waiting for input...");
     private final TextField expressionField = new TextField();
 
@@ -29,6 +29,8 @@ public class HelloApplication extends Application
 
     private final List<Card> deck = new ArrayList<>();
     private final Random rng = new Random();
+
+    private int points = 0;
 
     @Override
     public void start(Stage stage)
@@ -79,9 +81,9 @@ public class HelloApplication extends Application
         HBox cardsRow = new HBox(16, createCardSlot(0), createCardSlot(1), createCardSlot(2), createCardSlot(3));
         cardsRow.setAlignment(Pos.CENTER);
 
-        cardValuesLabel.setOpacity(0.75);
+        pointsLabel.setOpacity(0.75);
 
-        VBox centerArea = new VBox(14, cardsRow, cardValuesLabel);
+        VBox centerArea = new VBox(14, cardsRow, pointsLabel);
         centerArea.setAlignment(Pos.CENTER);
         centerArea.setPadding(new Insets(18));
 
@@ -125,7 +127,7 @@ public class HelloApplication extends Application
         VBox bottomArea = new VBox(panel);
         bottomArea.setPadding(new Insets(0, 16, 16, 16));
 
-        verifyBtn.setOnAction(e -> statusLabel.setText("Verify clicked (logic coming next)."));
+        verifyBtn.setOnAction(e -> verifyExpression());
 
         BorderPane layout = new BorderPane();
         layout.setTop(header);
@@ -241,7 +243,6 @@ public class HelloApplication extends Application
             cardViews[i].setImage(img);
         }
 
-        cardValuesLabel.setText("Card Values: " + Arrays.toString(cardValues));
         statusLabel.setText("Dealt new cards.");
     }
 
@@ -256,6 +257,269 @@ public class HelloApplication extends Application
             return null;
         }
         return new Image(url.toExternalForm());
+    }
+
+    private void verifyExpression()
+    {
+        String expr = expressionField.getText();
+        if (expr == null) {expr = "";}
+        expr = expr.trim();
+
+        if (expr.isEmpty())
+        {
+            statusLabel.setText("Enter an expression first.");
+            return;
+        }
+
+        List<Integer> used;
+        double result;
+
+        try
+        {
+            List<Token> tokens = tokenize(expr);
+            used = extractNumbersUsed(tokens);
+
+            if (used.size() != 4)
+            {
+                statusLabel.setText("You must use exactly 4 numbers.");
+                return;
+            }
+
+            if (!sameMultiset(used, cardValues))
+            {
+                statusLabel.setText("Numbers do not match the cards.");
+                return;
+            }
+
+            List<Token> rpn = toRpn(tokens);
+            result = evalRpn(rpn);
+        }
+        catch (RuntimeException ex)
+        {
+            statusLabel.setText("Invalid expression.");
+            return;
+        }
+
+        if (Math.abs(result - 24.0) < 0.000001)
+        {
+            points += 24;
+            pointsLabel.setText("Points: " + points);
+            statusLabel.setText("Correct. +24 points.");
+        }
+        else
+        {
+            statusLabel.setText("Result = " + result);
+        }
+    }
+
+    private boolean sameMultiset(List<Integer> used, int[] cards)
+    {
+        int[] a = new int[used.size()];
+        for (int i = 0; i < used.size(); i++) {a[i] = used.get(i);}
+
+        int[] b = Arrays.copyOf(cards, cards.length);
+
+        Arrays.sort(a);
+        Arrays.sort(b);
+
+        return Arrays.equals(a, b);
+    }
+
+    private List<Integer> extractNumbersUsed(List<Token> tokens)
+    {
+        List<Integer> nums = new ArrayList<>();
+        for (Token t : tokens)
+        {
+            if (t.type == TokenType.NUM)
+            {
+                int v = (int)Math.round(t.value);
+                nums.add(Math.abs(v));
+            }
+        }
+        return nums;
+    }
+
+    private List<Token> tokenize(String raw)
+    {
+        String s = raw.replaceAll("\\s+", "");
+        if (s.isEmpty()) {throw new RuntimeException("Expression is empty.");}
+
+        List<Token> out = new ArrayList<>();
+        int i = 0;
+
+        while (i < s.length())
+        {
+            char c = s.charAt(i);
+
+            if (Character.isDigit(c))
+            {
+                int j = i;
+                while (j < s.length() && Character.isDigit(s.charAt(j))) {j++;}
+                out.add(Token.num(Double.parseDouble(s.substring(i, j))));
+                i = j;
+                continue;
+            }
+
+            if (c == '(') {out.add(Token.lparen()); i++; continue;}
+            if (c == ')') {out.add(Token.rparen()); i++; continue;}
+
+            if (c == '+' || c == '*' || c == '/')
+            {
+                out.add(Token.op(c));
+                i++;
+                continue;
+            }
+
+            if (c == '-')
+            {
+                boolean unary = out.isEmpty() || out.get(out.size() - 1).type == TokenType.OP || out.get(out.size() - 1).type == TokenType.LPAREN;
+
+                if (unary)
+                {
+                    if (i + 1 < s.length() && Character.isDigit(s.charAt(i + 1)))
+                    {
+                        int j = i + 1;
+                        while (j < s.length() && Character.isDigit(s.charAt(j))) {j++;}
+                        out.add(Token.num(Double.parseDouble(s.substring(i, j))));
+                        i = j;
+                        continue;
+                    }
+
+                    out.add(Token.num(0));
+                    out.add(Token.op('-'));
+                    i++;
+                    continue;
+                }
+
+                out.add(Token.op('-'));
+                i++;
+                continue;
+            }
+
+            throw new RuntimeException("Invalid character: " + c);
+        }
+
+        return out;
+    }
+
+    private List<Token> toRpn(List<Token> tokens)
+    {
+        List<Token> output = new ArrayList<>();
+        Deque<Token> stack = new ArrayDeque<>();
+
+        for (Token t : tokens)
+        {
+            if (t.type == TokenType.NUM)
+            {
+                output.add(t);
+                continue;
+            }
+
+            if (t.type == TokenType.OP)
+            {
+                while (!stack.isEmpty() && stack.peek().type == TokenType.OP && precedence(stack.peek().op) >= precedence(t.op))
+                {
+                    output.add(stack.pop());
+                }
+                stack.push(t);
+                continue;
+            }
+
+            if (t.type == TokenType.LPAREN)
+            {
+                stack.push(t);
+                continue;
+            }
+
+            if (t.type == TokenType.RPAREN)
+            {
+                while (!stack.isEmpty() && stack.peek().type != TokenType.LPAREN)
+                {
+                    output.add(stack.pop());
+                }
+
+                if (stack.isEmpty() || stack.peek().type != TokenType.LPAREN) {throw new RuntimeException("Mismatched parentheses.");}
+                stack.pop();
+                continue;
+            }
+        }
+
+        while (!stack.isEmpty())
+        {
+            Token t = stack.pop();
+            if (t.type == TokenType.LPAREN) {throw new RuntimeException("Mismatched parentheses.");}
+            output.add(t);
+        }
+
+        return output;
+    }
+
+    private int precedence(char op)
+    {
+        if (op == '*' || op == '/') {return 2;}
+        return 1;
+    }
+
+    private double evalRpn(List<Token> rpn)
+    {
+        Deque<Double> st = new ArrayDeque<>();
+
+        for (Token t : rpn)
+        {
+            if (t.type == TokenType.NUM)
+            {
+                st.push(t.value);
+                continue;
+            }
+
+            if (t.type == TokenType.OP)
+            {
+                if (st.size() < 2) {throw new RuntimeException("Bad expression.");}
+
+                double b = st.pop();
+                double a = st.pop();
+                double r;
+
+                if (t.op == '+') {r = a + b;}
+                else if (t.op == '-') {r = a - b;}
+                else if (t.op == '*') {r = a * b;}
+                else if (t.op == '/')
+                {
+                    if (Math.abs(b) < 0.000000000001) {throw new RuntimeException("Division by zero.");}
+                    r = a / b;
+                }
+                else {throw new RuntimeException("Unknown operator: " + t.op);}
+
+                st.push(r);
+                continue;
+            }
+
+            throw new RuntimeException("Bad expression.");
+        }
+
+        if (st.size() != 1) {throw new RuntimeException("Bad expression.");}
+        return st.pop();
+    }
+
+    private enum TokenType {NUM, OP, LPAREN, RPAREN}
+
+    private static class Token
+    {
+        final TokenType type;
+        final double value;
+        final char op;
+
+        private Token(TokenType type, double value, char op)
+        {
+            this.type = type;
+            this.value = value;
+            this.op = op;
+        }
+
+        static Token num(double v) {return new Token(TokenType.NUM, v, '\0');}
+        static Token op(char c) {return new Token(TokenType.OP, 0, c);}
+        static Token lparen() {return new Token(TokenType.LPAREN, 0, '\0');}
+        static Token rparen() {return new Token(TokenType.RPAREN, 0, '\0');}
     }
 
     private enum Suit
