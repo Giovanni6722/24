@@ -5,26 +5,36 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
+import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.*;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.Stage;
 
+import java.util.*;
+
 public class HelloApplication extends Application
 {
-    private final ImageView card1 = new ImageView();
-    private final ImageView card2 = new ImageView();
-    private final ImageView card3 = new ImageView();
-    private final ImageView card4 = new ImageView();
+    private static final String CARD_DIR = "/cards/";
+
+    private final ImageView[] cardViews = new ImageView[4];
+    private final Label[] slotValueLabels = new Label[4];
 
     private final Label cardValuesLabel = new Label("Card Values: [?, ?, ?, ?]");
     private final Label statusLabel = new Label("Waiting for input...");
     private final TextField expressionField = new TextField();
 
+    private final int[] cardValues = new int[4];
+
+    private final List<Card> deck = new ArrayList<>();
+    private final Random rng = new Random();
+
     @Override
     public void start(Stage stage)
     {
+        buildDeck();
+
         StackPane root = new StackPane();
         root.setStyle("-fx-background-color: #f6f7fb; -fx-font-size: 14px;");
 
@@ -35,6 +45,8 @@ public class HelloApplication extends Application
         rulesPage.setManaged(false);
 
         root.getChildren().addAll(gamePage, rulesPage);
+
+        dealNewHand();
 
         Scene scene = new Scene(root, 900, 560);
         stage.setTitle("Card Game - 24");
@@ -64,12 +76,7 @@ public class HelloApplication extends Application
         header.setAlignment(Pos.CENTER);
         header.setPadding(new Insets(16, 16, 10, 16));
 
-        configureCardView(card1);
-        configureCardView(card2);
-        configureCardView(card3);
-        configureCardView(card4);
-
-        HBox cardsRow = new HBox(16, cardSlot(card1), cardSlot(card2), cardSlot(card3), cardSlot(card4));
+        HBox cardsRow = new HBox(16, createCardSlot(0), createCardSlot(1), createCardSlot(2), createCardSlot(3));
         cardsRow.setAlignment(Pos.CENTER);
 
         cardValuesLabel.setOpacity(0.75);
@@ -88,6 +95,7 @@ public class HelloApplication extends Application
         verifyBtn.setDefaultButton(true);
 
         Button refreshBtn = new Button("Refresh");
+        refreshBtn.setOnAction(e -> dealNewHand());
 
         Button rulesBtn = new Button("Rules");
         rulesBtn.setOnAction(e -> showPage(root, 1));
@@ -118,19 +126,16 @@ public class HelloApplication extends Application
         bottomArea.setPadding(new Insets(0, 16, 16, 16));
 
         verifyBtn.setOnAction(e -> statusLabel.setText("Verify clicked (logic coming next)."));
-        refreshBtn.setOnAction(e -> statusLabel.setText("Refresh clicked (logic coming next)."));
 
         BorderPane layout = new BorderPane();
         layout.setTop(header);
         layout.setCenter(centerArea);
         layout.setBottom(bottomArea);
         layout.setStyle("-fx-background-color: transparent;");
-
         return layout;
     }
 
-    private Pane buildRulesPage(StackPane root)
-    {
+    private Pane buildRulesPage(StackPane root) {
         Label title = new Label("Rules (Card 24)");
         title.setFont(Font.font("System", FontWeight.EXTRA_BOLD, 22));
 
@@ -181,24 +186,23 @@ public class HelloApplication extends Application
         layout.setCenter(card);
         BorderPane.setMargin(card, new Insets(16));
         layout.setStyle("-fx-background-color: transparent;");
-
         return layout;
     }
 
-    private static void configureCardView(ImageView iv)
+    private VBox createCardSlot(int i)
     {
+        ImageView iv = new ImageView();
         iv.setFitWidth(120);
         iv.setFitHeight(170);
         iv.setPreserveRatio(true);
-        // iv.setImage(...) later
-    }
 
-    private static StackPane cardSlot(ImageView iv)
-    {
-        StackPane slot = new StackPane(iv);
-        slot.setMinSize(132, 182);
-        slot.setPadding(new Insets(8));
-        slot.setStyle
+        Label valueLabel = new Label("?");
+        valueLabel.setFont(Font.font("System", FontWeight.BOLD, 14));
+
+        StackPane picture = new StackPane(iv);
+        picture.setMinSize(132, 182);
+        picture.setPadding(new Insets(8));
+        picture.setStyle
                 ("""
                 -fx-background-color: white;
                 -fx-border-color: #e6e8ef;
@@ -206,7 +210,98 @@ public class HelloApplication extends Application
                 -fx-background-radius: 16;
                 -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.10), 10, 0.25, 0, 3);
                 """);
+
+        VBox slot = new VBox(8, picture, valueLabel);
+        slot.setAlignment(Pos.CENTER);
+
+        cardViews[i] = iv;
+        slotValueLabels[i] = valueLabel;
         return slot;
+    }
+
+    private void buildDeck()
+    {
+        deck.clear();
+        for (Suit s : Suit.values())
+        {
+            for (Rank r : Rank.values()) {deck.add(new Card(r, s));}
+        }
+    }
+
+    private void dealNewHand()
+    {
+        Collections.shuffle(deck, rng);
+
+        for (int i = 0; i < 4; i++)
+        {
+            Card c = deck.get(i);
+            cardValues[i] = c.rank.value;
+            slotValueLabels[i].setText(c.rank.display + " (" + c.rank.value + ")");
+            Image img = loadCardImage(c);
+            cardViews[i].setImage(img);
+        }
+
+        cardValuesLabel.setText("Card Values: " + Arrays.toString(cardValues));
+        statusLabel.setText("Dealt new cards.");
+    }
+
+    private Image loadCardImage(Card c)
+    {
+        String file = CARD_DIR + c.rank.fileKey + "_of_" + c.suit.fileKey + ".png";
+        var url = getClass().getResource(file);
+
+        if (url == null)
+        {
+            statusLabel.setText("Missing image: " + file + " (check src/main/resources/cards/...)");
+            return null;
+        }
+        return new Image(url.toExternalForm());
+    }
+
+    private enum Suit
+    {
+        CLUBS("clubs"),
+        DIAMONDS("diamonds"),
+        HEARTS("hearts"),
+        SPADES("spades");
+
+        final String fileKey;
+        Suit(String fileKey) { this.fileKey = fileKey; }
+    }
+
+    private enum Rank
+    {
+        ACE("ace", "A", 1),
+        TWO("2", "2", 2),
+        THREE("3", "3", 3),
+        FOUR("4", "4", 4),
+        FIVE("5", "5", 5),
+        SIX("6", "6", 6),
+        SEVEN("7", "7", 7),
+        EIGHT("8", "8", 8),
+        NINE("9", "9", 9),
+        TEN("10", "10", 10),
+        JACK("jack", "J", 11),
+        QUEEN("queen", "Q", 12),
+        KING("king", "K", 13);
+
+        final String fileKey;
+        final String display;
+        final int value;
+
+        Rank(String fileKey, String display, int value)
+        {
+            this.fileKey = fileKey;
+            this.display = display;
+            this.value = value;
+        }
+    }
+
+    private static class Card
+    {
+        final Rank rank;
+        final Suit suit;
+        Card(Rank rank, Suit suit) { this.rank = rank; this.suit = suit; }
     }
 
     public static void main(String[] args) {launch(args);}
