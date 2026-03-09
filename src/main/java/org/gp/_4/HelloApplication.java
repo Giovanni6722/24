@@ -304,7 +304,9 @@ public class HelloApplication extends Application
         {
             points += 24;
             pointsLabel.setText("Points: " + points);
-            statusLabel.setText("Correct. +24 points.");
+            dealNewHand();
+            expressionField.clear();
+            statusLabel.setText("Correct. +24 points. New cards dealt.");
         }
         else
         {
